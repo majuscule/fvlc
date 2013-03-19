@@ -1,0 +1,37 @@
+#!/bin/bash
+
+PROCESS_COUNT="$(pgrep fvlc | wc -l)"
+if [[ $PROCESS_COUNT > 2 ]]
+then
+    exit 1
+fi
+
+SOURCE_DOMAIN="${1:?error: missing source argument}"
+DESTINATION_FILE="${2:?error: missing destination argument}.flv"
+
+# This loop is a hacky workaround
+# When tcpdump is given the -c1 argument,
+# it refuses to output the packet contents
+# :-(
+
+TEMPFILE=$(mktemp)
+while [ -z "$URLHEAD" ]
+do
+    LOCALHOST_IP=$(ifconfig wlan0 | grep 'inet ' | awk '{print $2}')
+    sudo tcpdump -vvvA -iwlan0 -s 500 \
+        "tcp port 80 and src $LOCALHOST_IP" >$TEMPFILE 2>/dev/null &
+    sleep 5s && kill $!
+    URLHEAD=$(grep 'GET /api/player' $TEMPFILE | awk '{print $2}')
+done
+
+rm $TEMPFILE
+
+QUERYURL="$SOURCE_DOMAIN$URLHEAD"
+VIDEO_URL=$(curl $QUERYURL)
+VIDEO_URL=${VIDEO_URL%\&title=*}
+VIDEO_URL=${VIDEO_URL#url=}
+
+mplayer $VIDEO_URL -dumpstream -dumpfile "$DESTINATION_FILE" 2>&1 >/dev/null & disown
+notify-send -i .config/film.png "Buffering video  "
+
+vlc "$DESTINATION_FILE"
